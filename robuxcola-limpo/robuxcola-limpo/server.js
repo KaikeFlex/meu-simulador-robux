@@ -12,11 +12,10 @@ app.use(express.static(__dirname));
 const FILE_PATH = path.join(__dirname, 'chaves.txt');
 
 // ========================================================
-// ⚡ SEGURANÇA: APENAS LIMPA CHAVES EXPIRADAS (NÃO DELETA TUDO)
+// ⚡ SEGURANÇA: APENAS LIMPA CHAVES EXPIRADAS
 // ========================================================
 function limparChavesExpiradas() {
     if (!fs.existsSync(FILE_PATH)) {
-        // Se o arquivo não existir, cria ele vazio
         fs.writeFileSync(FILE_PATH, '', 'utf-8');
         return;
     }
@@ -25,18 +24,18 @@ function limparChavesExpiradas() {
     const linhas = conteudo.split('\n').filter(l => l.trim() !== '');
     const agora = Date.now();
 
-    // Filtra e mantém apenas as chaves que ainda estão no tempo válido
+    // Mantém só as chaves dentro da validade
     const linhasValidas = linhas.filter(linha => {
-        const [_, exp] = linha.split(';');
-        return agora < parseInt(exp); // Mantém se o tempo atual for menor que o tempo de expiração
+        const partes = linha.split(';');
+        if (partes.length < 2) return false;
+        const exp = partes[1];
+        return agora < parseInt(exp); 
     });
 
-    // Salva de volta no arquivo apenas o que ainda está valendo
     fs.writeFileSync(FILE_PATH, linhasValidas.join('\n') + (linhasValidas.length > 0 ? '\n' : ''), 'utf-8');
-    console.log('🧹 Sistema iniciado: Chaves vencidas foram limpas. Chaves ativas preservadas!');
+    console.log('🧹 Sistema iniciado: Chaves antigas e vencidas limpas. Chaves VIP mantidas!');
 }
 
-// Executa a limpeza inteligente assim que o servidor liga
 limparChavesExpiradas();
 
 // ========================================================
@@ -46,11 +45,6 @@ limparChavesExpiradas();
 // Rota principal (Simulador)
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'robuxcomprar.html'));
-});
-
-// Rota para o seu painel de administrador
-app.get('/painel-admin', (req, res) => {
-    res.sendFile(path.join(__dirname, 'painel.html')); 
 });
 
 // Processo de verificação de chaves do Simulador
@@ -68,7 +62,10 @@ app.post('/verificar-chave', (req, res) => {
     const agora = Date.now();
 
     let novasLinhas = linhas.map(linha => {
-        let [ch, exp, dono] = linha.split(';');
+        let partes = linha.split(';');
+        if (partes.length < 2) return linha;
+        let [ch, exp, dono] = partes;
+        if (!dono) dono = "Nenhum";
         
         if (ch === chave) {
             if (agora > parseInt(exp)) {
@@ -96,12 +93,11 @@ app.post('/verificar-chave', (req, res) => {
     }
 });
 
-// Rota para criar chaves manuais pelo seu painel administrativo
+// Rota para o Bot do Discord ou você criar chaves manualmente (Via API / Postman)
 app.post('/criar-chave-manual', (req, res) => {
     const { chave, minutos } = req.body;
     const expiracao = Date.now() + (parseInt(minutos) * 60 * 1000);
     
-    // Adiciona a nova chave no fim do arquivo de forma permanente
     fs.appendFileSync(FILE_PATH, `${chave};${expiracao};Nenhum\n`, 'utf-8');
     res.json({ sucesso: true, mensagem: `Chave ${chave} criada com sucesso!` });
 });
