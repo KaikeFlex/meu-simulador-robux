@@ -1,10 +1,8 @@
 {
-  "name": "robux-server",
+  "name": "meu-simulador-robux",
   "version": "1.0.0",
-  "description": "Servidor Robux com Express",
   "main": "server.js",
   "scripts": {
-    "build": "npm install express",
     "start": "node server.js"
   },
   "dependencies": {
