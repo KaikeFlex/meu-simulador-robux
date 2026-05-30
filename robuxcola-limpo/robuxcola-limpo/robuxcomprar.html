@@ -889,14 +889,17 @@ function salvarConfiguracaoCliente() {
     const nick = document.getElementById('userNickInput').value.trim();
     const robux = document.getElementById('userRobuxInput').value.trim();
 
-    if (key === "" || nick === "" || robux === "") {
+    if (!key || !nick || !robux) {
         alert("⚠️ Por favor, preencha todos os campos obrigatórios!");
         return;
     }
 
     // Avisa o servidor quem é o dono atual desta chave
-    fetch('/api/verificar-key?key=' + encodeURIComponent(key) + '&nick=' + encodeURIComponent(nick))
-        .then(res => res.json())
+    fetch(`/api/verificar-key?key=${encodeURIComponent(key)}&nick=${encodeURIComponent(nick)}`)
+        .then(res => {
+            if (!res.ok) throw new Error();
+            return res.json();
+        })
         .then(res => {
             if (res.valida) {
                 // Guarda os dados na sessão do navegador atual
@@ -905,7 +908,8 @@ function salvarConfiguracaoCliente() {
                 sessionStorage.setItem('render_robux', robux);
                 
                 // Esconde o modal e atualiza a página para aplicar
-                document.getElementById('loginModal').style.display = 'none';
+                const modal = document.getElementById('loginModal');
+                if (modal) modal.style.display = 'none';
                 location.reload();
             } else {
                 alert("❌ Chave inválida ou já expirada! Fale com o administrador.");
@@ -918,6 +922,7 @@ function salvarConfiguracaoCliente() {
 // 2. MONITOR DE DISPOSITIVO ÚNICO (TEMPO REAL)
 // ==========================================
 (function gerenciarSessaoObrigatoria() {
+    // Limpa o localStorage para evitar persistência indevida
     localStorage.clear();
     
     const keyTemporaria = sessionStorage.getItem('render_key');
@@ -932,13 +937,25 @@ function salvarConfiguracaoCliente() {
             if (modal) modal.style.display = 'none';
         });
 
-        // Modifica as chamadas padrão do site para incluir os dados do cliente
+        // Modifica as chamadas padrão do site de forma segura
         const fetchOriginal = window.fetch;
-        window.fetch = function() {
-            if (arguments[0] && arguments[0].includes('/api/local-user')) {
-                arguments[0] = `/api/local-user?customNick=${encodeURIComponent(nickTemporario)}&customRobux=${robuxTemporario}&userKey=${encodeURIComponent(keyTemporaria)}`;
+        window.fetch = function(input, init) {
+            let url = typeof input === 'string' ? input : input.url;
+
+            if (url && url.includes('/api/local-user')) {
+                const urlObj = new URL(url, window.location.origin);
+                urlObj.searchParams.set('customNick', nickTemporario);
+                urlObj.searchParams.set('customRobux', robuxTemporario);
+                urlObj.searchParams.set('userKey', keyTemporaria);
+                
+                if (typeof input === 'string') {
+                    input = urlObj.toString();
+                } else {
+                    input = new Request(urlObj.toString(), input);
+                }
             }
-            return fetchOriginal.apply(this, arguments).then(response => {
+
+            return fetchOriginal.apply(this, [input, init]).then(response => {
                 if (response.status === 401) {
                     desconectarUsuario();
                 }
@@ -946,16 +963,17 @@ function salvarConfiguracaoCliente() {
             });
         };
 
-        // 🔥 FUNÇÃO SECRETA: Verifica o status a cada 3 segundos em segundo plano
+        // Verifica o status a cada 5 segundos em segundo plano (ajustado para poupar o servidor)
         setInterval(function() {
-            fetchOriginal(`/api/local-user?customNick=${encodeURIComponent(nickTemporario)}&customRobux=${robuxTemporario}&userKey=${encodeURIComponent(keyTemporaria)}`)
+            const checkUrl = `/api/local-user?customNick=${encodeURIComponent(nickTemporario)}&customRobux=${robuxTemporario}&userKey=${encodeURIComponent(keyTemporaria)}`;
+            fetchOriginal(checkUrl)
                 .then(response => {
                     if (response.status === 401) {
                         desconectarUsuario();
                     }
                 })
                 .catch(() => {});
-        }, 3000); // 3000 milissegundos = 3 segundos
+        }, 5000); 
     }
 })();
 
@@ -963,7 +981,7 @@ function salvarConfiguracaoCliente() {
 function desconectarUsuario() {
     sessionStorage.clear(); // Limpa os dados salvos
     alert("⚠️ Outro dispositivo entrou usando esta mesma Key ou o tempo expirou! Você foi desconectado.");
-    location.reload(); // Trava a tela mandando de volta para o login
+    location.reload(); // Manda de volta para o login
 }
 </script>
 
