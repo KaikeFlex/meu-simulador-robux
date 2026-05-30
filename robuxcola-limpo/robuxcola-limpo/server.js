@@ -6,51 +6,49 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve os arquivos HTML (garante que procura na pasta correta)
+// Serve os arquivos HTML
 app.use(express.static(__dirname));
 
 const FILE_PATH = path.join(__dirname, 'chaves.txt');
 
-// Função para gerar uma chave aleatória simples (Ex: TESTE-A8F2K9)
-function gerarChaveAleatoria() {
-    return 'TESTE-' + Math.random().toString(36).substring(2, 9).toUpperCase();
-}
+// ========================================================
+// ⚡ SEGURANÇA: APENAS LIMPA CHAVES EXPIRADAS (NÃO DELETA TUDO)
+// ========================================================
+function limparChavesExpiradas() {
+    if (!fs.existsSync(FILE_PATH)) {
+        // Se o arquivo não existir, cria ele vazio
+        fs.writeFileSync(FILE_PATH, '', 'utf-8');
+        return;
+    }
 
-// ========================================================
-// ⚡ LIMPEZA COMPLETA: APAGA AS CHAVES ANTIGAS E CRIA 2 NOVAS
-// ========================================================
-function inicializarChaves() {
+    const conteudo = fs.readFileSync(FILE_PATH, 'utf-8');
+    const linhas = conteudo.split('\n').filter(l => l.trim() !== '');
     const agora = Date.now();
-    const tempoValidade = 10 * 60 * 1000; // 10 minutos de duração
-    const expiracao = agora + tempoValidade;
 
-    // Cria as duas chaves novas aleatórias
-    const chave1 = gerarChaveAleatoria();
-    const chave2 = gerarChaveAleatoria();
+    // Filtra e mantém apenas as chaves que ainda estão no tempo válido
+    const linhasValidas = linhas.filter(linha => {
+        const [_, exp] = linha.split(';');
+        return agora < parseInt(exp); // Mantém se o tempo atual for menor que o tempo de expiração
+    });
 
-    // Monta o texto que vai para o arquivo (formato: CHAVE;EXPIRACAO;DONO)
-    const dadosIniciais = `${chave1};${expiracao};Nenhum\n${chave2};${expiracao};Nenhum\n`;
-
-    // Escreve do zero no arquivo chaves.txt, apagando tudo o que existia antes!
-    fs.writeFileSync(FILE_PATH, dadosIniciais, 'utf-8');
-    
-    console.log('🧹 Arquivo limpo! Chaves antigas deletadas.');
-    console.log(`🔑 Novas chaves de teste criadas: [${chave1}] e [${chave2}]`);
+    // Salva de volta no arquivo apenas o que ainda está valendo
+    fs.writeFileSync(FILE_PATH, linhasValidas.join('\n') + (linhasValidas.length > 0 ? '\n' : ''), 'utf-8');
+    console.log('🧹 Sistema iniciado: Chaves vencidas foram limpas. Chaves ativas preservadas!');
 }
 
-// Executa a função assim que o servidor da Render liga
-inicializarChaves();
+// Executa a limpeza inteligente assim que o servidor liga
+limparChavesExpiradas();
 
 // ========================================================
-// ROTAS DO TEU SITE
+// ROTAS DO SEU SITE
 // ========================================================
 
-// Rota principal (leva para o simulador)
+// Rota principal (Simulador)
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'robuxcomprar.html'));
 });
 
-// Rota para o teu painel de administrador
+// Rota para o seu painel de administrador
 app.get('/painel-admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'painel.html')); 
 });
@@ -74,7 +72,7 @@ app.post('/verificar-chave', (req, res) => {
         
         if (ch === chave) {
             if (agora > parseInt(exp)) {
-                mensagemErro = "Esta chave de teste já expirou!";
+                mensagemErro = "Esta chave já expirou!";
                 return linha; 
             }
             if (dono !== "Nenhum" && dono !== nick) {
@@ -83,7 +81,7 @@ app.post('/verificar-chave', (req, res) => {
             }
             
             chaveValida = true;
-            dono = nick; // Vincula a chave ao nick de quem entrou
+            dono = nick; 
             return `${ch};${exp};${dono}`;
         }
         return linha;
@@ -94,21 +92,21 @@ app.post('/verificar-chave', (req, res) => {
     if (chaveValida) {
         return res.json({ valido: true });
     } else {
-        return res.json({ valido: false, message: mensagemErro });
+        return res.json({ valido: false, mensagem: mensagemErro });
     }
 });
 
-// Rota para criar chaves manuais (para os teus clientes VIPs/Fixos)
+// Rota para criar chaves manuais pelo seu painel administrativo
 app.post('/criar-chave-manual', (req, res) => {
     const { chave, minutos } = req.body;
     const expiracao = Date.now() + (parseInt(minutos) * 60 * 1000);
     
-    // Adiciona a chave VIP no final do arquivo sem apagar as outras
+    // Adiciona a nova chave no fim do arquivo de forma permanente
     fs.appendFileSync(FILE_PATH, `${chave};${expiracao};Nenhum\n`, 'utf-8');
-    res.json({ sucesso: true, mensagem: `Chave ${chave} criada!` });
+    res.json({ sucesso: true, mensagem: `Chave ${chave} criada com sucesso!` });
 });
 
-// Inicialização correta para a Render
+// Inicialização para a Render
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Servidor online na porta ${PORT}`);
