@@ -5,7 +5,6 @@ const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(__dirname));
 
 const FILE_PATH = path.join(__dirname, 'chaves.txt');
 
@@ -134,7 +133,6 @@ app.get('/painel-admin', (req, res) => {
 // ⚡ CONTROLE INTERNO DAS CHAVES (APIs)
 // ========================================================
 
-// Lista as chaves para a tabela do painel
 app.get('/api/listar-chaves', (req, res) => {
     if (!fs.existsSync(FILE_PATH)) return res.json([]);
     const conteudo = fs.readFileSync(FILE_PATH, 'utf-8');
@@ -159,16 +157,14 @@ app.get('/api/listar-chaves', (req, res) => {
     res.json(lista);
 });
 
-// Cria chaves direto pelo Painel Visual
 app.post('/criar-chave-manual', (req, res) => {
     const { chave, minutos } = req.body;
     const expiracao = Date.now() + (parseInt(minutos) * 60 * 1000);
     
     fs.appendFileSync(FILE_PATH, `${chave};${expiracao};Nenhum\n`, 'utf-8');
-    res.json({ sucesso: true });
+    res.json({嘘cesso: true });
 });
 
-// Remove a chave e o dono na hora
 app.post('/api/deletar-chave', (req, res) => {
     const { chave } = req.body;
     if (!fs.existsSync(FILE_PATH)) return res.json({ sucesso: false });
@@ -183,13 +179,6 @@ app.post('/api/deletar-chave', (req, res) => {
 
     fs.writeFileSync(FILE_PATH, novasLinhas.join('\n') + (novasLinhas.length > 0 ? '\n' : ''), 'utf-8');
     res.json({ sucesso: true });
-});
-
-// ========================================================
-// 🛡️ VALIDAÇÃO DE LOGIN ÚNICO DO SEU SITE (TRAVA DE NICK)
-// ========================================================
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'robuxcomprar.html'));
 });
 
 app.post('/verificar-chave', (req, res) => {
@@ -207,18 +196,15 @@ app.post('/verificar-chave', (req, res) => {
         if (!dono || dono.trim() === "") dono = "Nenhum";
         
         if (ch === chave) {
-            // 1. Verifica se expirou
             if (agora > parseInt(exp)) {
                 mensagemErro = "Esta chave já expirou!";
                 return linha; 
             }
-            // 2. Se a chave já tem dono e o Nick digitado for diferente, bloqueia o intruso!
             if (dono !== "Nenhum" && dono.toLowerCase() !== nick.toLowerCase()) {
                 mensagemErro = `Esta chave está trancada no Nick: ${dono}`;
                 return linha;
             }
             
-            // 3. Se não tem dono, esse Nick vira o dono definitivo dela
             chaveValida = true;
             if (dono === "Nenhum") {
                 dono = nick;
@@ -233,11 +219,17 @@ app.post('/verificar-chave', (req, res) => {
     if (chaveValida) {
         return res.json({ valido: true });
     } else {
-        return res.json({ valido: false, mensagem: mensagemErro });
+        return res.json({ valido: false, message: mensagemErro });
     }
 });
 
-// Roda perfeitamente na porta automática da Render
+// Arquivos estáticos declarados DEPOIS das rotas principais para não bugar
+app.use(express.static(__dirname));
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'robuxcomprar.html'));
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Servidor rodando com sucesso na porta ${PORT}`);
