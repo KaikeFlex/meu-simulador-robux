@@ -7,20 +7,28 @@ const PORT = process.env.PORT || 10000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve os arquivos estáticos (HTML, CSS, JS do frontend) que estão na pasta public
-app.use(express.static(path.join(__dirname, 'public')));
+// CORREÇÃO: Serve os arquivos estáticos direto da raiz (onde estão seus HTMLs, CSS e JS)
+app.use(express.static(__dirname));
 
-// --- BANCO DE DADOS TEMPORÁRIO (Apenas exemplo, adapte para o seu) ---
+// --- BANCO DE DADOS TEMPORÁRIO ---
 let chavesAtivas = [
     { key: "ktz", tempo: 1, dono: null }
 ];
 
 // ==========================================
+// ROTA PARA A PÁGINA PRINCIPAL DO SITE (/)
+// ==========================================
+app.get('/', (req, res) => {
+    // Abre o arquivo de login principal (geralmente index.html)
+    res.sendFile(path.join(__dirname, 'index.html')); 
+});
+
+// ==========================================
 // ROTA PARA ENTRAR NO PAINEL ADMIN
 // ==========================================
 app.get('/painel-admin', (req, res) => {
-    // Certifique-se de que o ficheiro do painel existe nesta pasta
-    res.sendFile(path.join(__dirname, 'public', 'painel-admin.html')); 
+    // CORREÇÃO: Busca o painel direto na raiz do projeto
+    res.sendFile(path.join(__dirname, 'painel-admin.html')); 
 });
 
 // ==========================================
@@ -29,18 +37,15 @@ app.get('/painel-admin', (req, res) => {
 app.get('/api/verificar-key', (req, res) => {
     const { key, nick } = req.query;
 
-    // Procura se a chave existe no sistema
     const chaveEncontrada = chavesAtivas.find(c => c.key === key);
 
     if (chaveEncontrada) {
-        // Se a chave não tem dono ou já é do utilizador atual, valida o acesso
         if (chaveEncontrada.dono === null || chaveEncontrada.dono === nick) {
-            chaveEncontrada.dono = nick; // Bloqueia a chave para este Nick
+            chaveEncontrada.dono = nick; 
             return res.json({ valida: true });
         }
     }
 
-    // Se não encontrar ou se já tiver outro dono logado
     return res.json({ valida: false });
 });
 
@@ -52,7 +57,6 @@ app.get('/api/local-user', (req, res) => {
 
     const chaveEncontrada = chavesAtivas.find(c => c.key === userKey);
 
-    // Se a chave sumiu do sistema ou o dono mudou (outro dispositivo entrou)
     if (!chaveEncontrada || chaveEncontrada.dono !== customNick) {
         return res.status(401).json({ erro: "Sessão inválida ou expirada" });
     }
