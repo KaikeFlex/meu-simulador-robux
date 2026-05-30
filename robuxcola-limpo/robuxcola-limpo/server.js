@@ -3,27 +3,25 @@ const fs = require('fs/promises');
 const path = require('path');
 
 const PORT = Number(process.env.PORT || 8765);
-const HOST = '127.0.0.1';
 const ROOT = __dirname;
 const CACHE_TTL = 5 * 60_000;
 const STALE_CACHE_TTL = 60 * 60_000;
 const cache = new Map();
 
-// Caminho para salvar as chaves no computador
+// Arquivos para salvar dados de forma permanente
 const FILE_CHAVES = path.join(ROOT, 'chaves.txt');
+const FILE_SESSOES = path.join(ROOT, 'sessoes.txt');
 
-// Banco de dados na memória. Formato: 'nome_da_key' => timestamp_expiracao
 let CHAVES_ATIVAS = new Map();
-
-// 👤 CONTROLE DE SESSÃO ÚNICA: Guarda qual Nick está usando a Key atualmente
-// Formato: 'nome_da_key' => 'NickDoUsuario'
 let SESSÕES_ATIVAS = new Map();
 
 // Chaves padrão eternas (nunca expiram)
 CHAVES_ATIVAS.set('teste123', 9999999999999);
+SESSÕES_ATIVAS.set('teste123', 'Ninguém ainda');
 CHAVES_ATIVAS.set('cliente77', 9999999999999);
+SESSÕES_ATIVAS.set('cliente77', 'Ninguém ainda');
 
-// Função para carregar as chaves salvas do arquivo ao iniciar
+// Carregar chaves e sessões salvas do arquivo ao iniciar
 async function carregarChavesDoArquivo() {
   try {
     const conteudo = await fs.readFile(FILE_CHAVES, 'utf8');
@@ -37,9 +35,23 @@ async function carregarChavesDoArquivo() {
         const expiracao = Number(expStr);
         if (expiracao > agora) {
           CHAVES_ATIVAS.set(key.trim(), expiracao);
+          SESSÕES_ATIVAS.set(key.trim(), 'Ninguém ainda');
         }
       }
     }
+    
+    // Recupera os donos das sessões travadas
+    try {
+      const contSessoes = await fs.readFile(FILE_SESSOES, 'utf8');
+      for (const linha of contSessoes.split(/\r?\n/)) {
+        if (!linha.trim()) continue;
+        const [key, dono] = ServerSplit(linha, ':');
+        if (key && dono && CHAVES_ATIVAS.has(key.trim())) {
+          SESSÕES_ATIVAS.set(key.trim(), dono.trim());
+        }
+      }
+    } catch (e) {}
+
     await salvarChavesNoArquivo();
     console.log('📦 Chaves ativas carregadas:', Array.from(CHAVES_ATIVAS.keys()));
   } catch {
@@ -53,16 +65,19 @@ function ServerSplit(str, char) {
   return [str.slice(0, i), str.slice(i+1)];
 }
 
-// Função para salvar a lista no arquivo chaves.txt
+// Salva o estado atual no disco
 async function salvarChavesNoArquivo() {
   try {
-    const linhas = [];
+    const linhasChaves = [];
+    const linhasSessoes = [];
     for (const [key, expiracao] of CHAVES_ATIVAS.entries()) {
-      linhas.push(`${key}:${expiracao}`);
+      linhasChaves.push(`${key}:${expiracao}`);
+      linhasSessoes.push(`${key}:${SESSÕES_ATIVAS.get(key) || 'Ninguém ainda'}`);
     }
-    await fs.writeFile(FILE_CHAVES, lines.join('\n'), 'utf8');
+    await fs.writeFile(FILE_CHAVES, linhasChaves.join('\n'), 'utf8');
+    await fs.writeFile(FILE_SESSOES, linhasSessoes.join('\n'), 'utf8');
   } catch (err) {
-    console.error('Erro ao salvar chaves.txt:', err);
+    console.error('Erro ao salvar arquivos de dados:', err);
   }
 }
 
@@ -74,7 +89,7 @@ setInterval(async () => {
   for (const [key, expiracao] of CHAVES_ATIVAS.entries()) {
     if (agora >= expiracao) {
       CHAVES_ATIVAS.delete(key);
-      SESSÕES_ATIVAS.delete(key); // Remove a sessão também se expirar
+      SESSÕES_ATIVAS.delete(key);
       mudou = true;
       console.log(`⏰ A chave "${key}" expirou e foi removida.`);
     }
@@ -224,14 +239,14 @@ async function handleLocalUser(req, res) {
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);
   const customNick = requestUrl.searchParams.get('customNick');
   const customRobux = requestUrl.searchParams.get('customRobux');
-  const userKey = requestUrl.searchParams.get('userKey'); // Recebe a key enviada pelo site
+  const userKey = requestUrl.searchParams.get('userKey');
 
-  // 🛡️ SEGUNDA BARREIRA: Se a key expirou ou o Nick atual não bate com quem está logado na key, desloga!
   if (userKey) {
     const expiracao = CHAVES_ATIVAS.get(userKey);
     const donoAtual = SESSÕES_ATIVAS.get(userKey);
 
-    if (!expiracao || expiracao <= Date.now() || (customNick && donoAtual && donoAtual.toLowerCase() !== String(customNick).trim().toLowerCase())) {
+    // Se a key expirou ou o Nick logado mudou no meio da sessão, bloqueia
+    if (!expiracao || expiracao <= Date.now() || (customNick && donoAtual && donoAtual !== 'Ninguém ainda' && donoAtual.toLowerCase() !== String(customNick).trim().toLowerCase())) {
       sendJson(res, 401, { error: 'Sessão derrubada ou key inválida' });
       return;
     }
@@ -328,6 +343,7 @@ async function serveStatic(req, res) {
             });
           }
           function deletarKey(key) {
+            if(!confirm('Deseja remover essa chave?')) return;
             fetch('/api/remover-key?key=' + encodeURIComponent(key)).then(() => carregarKeys());
           }
           carregarKeys();
@@ -359,19 +375,28 @@ async function serveStatic(req, res) {
 }
 
 const server = http.createServer((req, res) => {
-  // 🛡️ PRIMEIRA BARREIRA: Quando clica em "Gerar e Entrar"
+  // Verificação com trava de Nick de uso único
   if (req.url.startsWith('/api/verificar-key')) {
     const requestUrl = new URL(req.url, `http://${req.headers.host}`);
     const key = requestUrl.searchParams.get('key');
-    const nick = requestUrl.searchParams.get('nick'); // Recebe quem está tentando logar agora
+    const nick = requestUrl.searchParams.get('nick');
     
     const expiracao = CHAVES_ATIVAS.get(key);
-    const valida = expiracao && expiracao > Date.now();
+    let valida = expiracao && expiracao > Date.now();
     
     if (valida && nick) {
-      // 🔄 Sobrescreve e assume a nova sessão com o novo Nick (derruba o anterior)
-      SESSÕES_ATIVAS.set(key, String(nick).trim());
-      console.log(`👤 Nova sessão: A key "${key}" agora pertence a: ${nick}`);
+      const donoAtual = SESSÕES_ATIVAS.get(key);
+      
+      if (donoAtual === 'Ninguém ainda') {
+        // Vincula o primeiro nick permanentemente
+        SESSÕES_ATIVAS.set(key, String(nick).trim());
+        salvarChavesNoArquivo();
+        console.log(`👤 Key Trancada: A key "${key}" agora pertence a: ${nick}`);
+      } else if (donoAtual.toLowerCase() !== String(nick).trim().toLowerCase()) {
+        // Recusa acesso se outro Nick tentar usar a mesma Key
+        valida = false;
+        console.log(`🚫 Bloqueado: ${nick} tentou usar a key trancada de ${donoAtual}`);
+      }
     }
     
     sendJson(res, 200, { valida: !!valida });
@@ -435,7 +460,8 @@ const server = http.createServer((req, res) => {
 });
 
 carregarChavesDoArquivo().then(() => {
-  server.listen(PORT, HOST, () => {
-    console.log(`Robux local server running at http://${HOST}:${PORT}/robuxcomprar.html`);
+  // Ajustado para '0.0.0.0' para que a Render consiga mapear o tráfego de fora!
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Robux local server running on port ${PORT}`);
   });
 });
